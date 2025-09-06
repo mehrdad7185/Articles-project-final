@@ -1,0 +1,68 @@
+
+
+services:
+
+  scheduler:
+    build:
+      context: .
+      dockerfile: Dockerfile.scheduler
+    container_name: scheduler
+    ports:
+      - "5000:5000"
+    networks:
+      - fog-net
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+
+  # --- declaring iot device ---
+  iot-device:
+    build:
+      context: .
+      dockerfile: Dockerfile.iot
+
+    networks:
+      - fog-net
+    depends_on:
+      - scheduler
+    deploy:
+      replicas: 4
+  # stronger node no 1
+  fog-node-1:
+    build:
+      context: .
+      dockerfile: Dockerfile.fog
+    container_name: fog-node-1
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: '512M'
+    networks:
+      - fog-net
+
+  #  weaker node no 2
+  fog-node-2:
+    build:
+      context: .
+      dockerfile: Dockerfile.fog
+    container_name: fog-node-2
+    deploy:
+      resources:
+        limits:
+          cpus: '0.25'
+          memory: '256M'
+    networks:
+      - fog-net
+  
+  # cloud
+  cloud-server:
+    build:
+      context: .
+      dockerfile: Dockerfile.cloud 
+    container_name: cloud-server
+    networks:
+      - fog-net
+
+networks:
+  fog-net:
+    driver: bridge

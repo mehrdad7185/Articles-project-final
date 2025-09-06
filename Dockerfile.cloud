@@ -1,0 +1,7 @@
+# Dockerfile.cloud
+
+# Use a minimal base image, as it does nothing for now
+FROM alpine:latest
+
+# A command that keeps the container running
+CMD ["sleep", "infinity"]

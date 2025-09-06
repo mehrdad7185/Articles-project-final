@@ -1,0 +1,17 @@
+# Dockerfile.iot
+
+# Use a lightweight Python base image
+FROM python:3.9-slim
+
+# Set the working directory inside the container
+WORKDIR /app
+
+COPY requirements.txt .
+
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy the source code into the container
+COPY sources/iot_device.py .
+
+# Run the python script when the container starts
+CMD ["python", "-u", "iot_device.py"]

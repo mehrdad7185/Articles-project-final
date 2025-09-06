@@ -1,0 +1,13 @@
+# Dockerfile.fog
+
+# Use a lightweight Python base image
+FROM python:3.9-slim
+
+# Set the working directory inside the container
+WORKDIR /app
+
+# Copy the source code into the container
+COPY sources/fog_node.py .
+
+# Run the python script when the container starts
+CMD ["python", "-u", "fog_node.py"]
