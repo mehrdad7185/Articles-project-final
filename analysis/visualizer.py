@@ -1,99 +1,111 @@
-# visualizer.py (Final Unified Version)
 
 import pandas as pd
 import matplotlib.pyplot as plt
-import seaborn as sns
 import matplotlib.dates as mdates
+import seaborn as sns
 
-def plot_single_scenario(data, scenario_name):
+def create_visualizations(csv_path):
     """
-    Creates a detailed, multi-metric plot for a single scenario,
-    based on the user's preferred high-quality style.
+    Reads the final, clean data and creates publication-quality plots.
+    This version includes fixes for the NameError and TypeError.
     """
-    print(f"Generating detailed plots for '{scenario_name}' scenario...")
-    
+    try:
+        data = pd.read_csv(csv_path, parse_dates=['timestamp'])
+    except (FileNotFoundError, KeyError):
+        print(f"Error reading '{csv_path}'. Please run the parser.py script first.")
+        return
+
+    sns.set_theme(style="darkgrid", palette="colorblind")
+
     # --- Data Extraction ---
-    cpu_data = data[data['metric'] == 'cpu'].copy()
-    mem_data = data[data['metric'] == 'memory'].copy()
-    latency_data = data[data['metric'] == 'latency'].copy()
-    risk_data = data[data['metric'] == 'risk'].copy()
+    latency_data = data[data['metric'] == 'latency']
+    failure_scenario_data = data[data['scenario'] == 'Resource-Aware (Failure)']
+    cpu_data = failure_scenario_data[failure_scenario_data['metric'] == 'cpu']
+    mem_data = failure_scenario_data[failure_scenario_data['metric'] == 'memory'].copy() # Use .copy() to avoid warnings
+    event_data = failure_scenario_data[failure_scenario_data['metric'] == 'event']
 
-    # --- Plot 1: CPU Time-Series ---
+    # --- Plot 1: Latency Distribution ---
+    if not latency_data.empty:
+        
+        latency_data = latency_data.copy()
+        latency_data['value'] = pd.to_numeric(latency_data['value'], errors='coerce')
+
+        plt.figure(figsize=(10, 8)) # Increased figure height for better readability
+
+        # --- KEY CHANGE: Replace sns.boxplot with sns.violinplot ---
+        # A violin plot is much better at showing the distribution shape when there are outliers.
+        ax = sns.violinplot(x='scenario', y='value', data=latency_data, inner="quartile")
+        
+        ax.yaxis.set_major_locator(plt.MaxNLocator(nbins=12))
+        ax.set_title('Service Response Time Distribution per Scenario', fontsize=16)
+        ax.set_ylabel('Response Time (ms)')
+        ax.set_xlabel('Scenario')
+        # Add a grid for better value reading
+        ax.grid(True, which='both', linestyle='--', linewidth=0.5)
+        
+        plt.savefig('plot_latency_distribution.png', dpi=300, bbox_inches='tight')
+        print("Saved: plot_latency_distribution.png")
+
+    # --- Plot 2: CPU Usage Time-Series with Rolling Average ---
     if not cpu_data.empty:
-        # Smooth the CPU data for better readability
-        cpu_data['cpu_smooth'] = cpu_data.groupby('node')['value'].transform(lambda s: s.rolling(5, min_periods=1).mean())
         plt.figure(figsize=(20, 8))
+        cpu_data = cpu_data.copy()
+        cpu_data['cpu_smooth'] = cpu_data.groupby('node')['value'].transform(lambda s: s.rolling(15, min_periods=1).mean())
         ax = sns.lineplot(x='timestamp', y='cpu_smooth', data=cpu_data, hue='node', style='node', linewidth=2.5)
+        ax.yaxis.set_major_locator(plt.MaxNLocator(nbins=8))
         ax.xaxis.set_major_formatter(mdates.DateFormatter('%M:%S'))
-        ax.set_title(f'CPU Load Distribution in {scenario_name} Scenario', fontsize=18)
-        ax.set_ylabel('Smoothed CPU Usage (%)')
+        ax.set_title('Smoothed CPU Usage During Failure & Recovery Scenario', fontsize=18)
+        ax.set_ylabel('CPU Usage (%) (Rolling Average)')
+        # --- KEY FIX: Corrected the typo ---
         ax.set_xlabel('Time (Minute:Second)')
         ax.legend(title='Fog Node')
-        # Save the plot with a descriptive filename
-        plt.savefig(f'plot_cpu_{scenario_name.lower()}.png', dpi=300, bbox_inches='tight')
-        print(f"Saved: plot_cpu_{scenario_name.lower()}.png")
-        plt.close()
+        plt.savefig('plot_cpu_timeseries.png', dpi=300, bbox_inches='tight')
+        print("Saved: plot_cpu_timeseries.png")
 
-    # --- Plot 2: Memory Time-Series (if available) ---
+    # --- Plot 3: Memory Usage with Clean Annotations ---
     if not mem_data.empty:
+        # --- KEY FIX: Ensure the 'value' column is numeric to prevent TypeError ---
+        mem_data['value'] = pd.to_numeric(mem_data['value'], errors='coerce')
+        mem_data.dropna(subset=['value'], inplace=True) # Drop rows where conversion failed
+
         plt.figure(figsize=(20, 8))
-        ax = sns.lineplot(x='timestamp', y='value', data=mem_data, hue='node', style='node', linewidth=2.5)
+        ax = sns.lineplot(x='timestamp', y='value', data=mem_data, hue='node', style='node', markers=True, linewidth=2)
+        
+        # Manually set the y-axis to be more intuitive
+        y_max_val = mem_data['value'].max()
+        ax.set_ylim(bottom=-0.5, top=y_max_val * 1.1) 
+
+        y_min, y_max = ax.get_ylim()
+
+        if not event_data.empty:
+            for _, event in event_data.iterrows():
+                node_short_name = event['node'].replace('fog-node-', 'FN-')
+                
+                if event['value'] == 'DOWN':
+                    y_offset_text = y_max * 0.01 
+                    y_offset_arrow = y_max * 0.1
+                    color = 'red'
+                else: # 'UP'
+                    y_offset_text = y_max * 0.08
+                    y_offset_arrow = y_max * 0.1
+                    color = 'green'
+
+                ax.annotate(f"{node_short_name} {event['value']}",
+                            xy=(event['timestamp'], y_offset_arrow),
+                            xytext=(event['timestamp'], y_offset_text),
+                            arrowprops=dict(facecolor=color, shrink=0.05, width=1.5, headwidth=5),
+                            ha='center', va='bottom', fontsize=11, color=color,
+                            bbox=dict(boxstyle="round,pad=0.2", fc="white", ec="none", alpha=0.8))
+        
         ax.xaxis.set_major_formatter(mdates.DateFormatter('%M:%S'))
-        ax.set_title(f'Memory Usage in {scenario_name} Scenario', fontsize=18)
+        ax.set_title('Memory Usage During Failure & Recovery Scenario', fontsize=18)
         ax.set_ylabel('Memory Usage (MB)')
         ax.set_xlabel('Time (Minute:Second)')
         ax.legend(title='Fog Node')
-        plt.savefig(f'plot_memory_{scenario_name.lower()}.png', dpi=300, bbox_inches='tight')
-        print(f"Saved: plot_memory_{scenario_name.lower()}.png")
-        plt.close()
+        plt.savefig('plot_memory_final.png', dpi=300, bbox_inches='tight')
+        print("Saved: plot_memory_final.png")
 
-    # --- Plot 3: Risk Score Time-Series (if available) ---
-    if not risk_data.empty:
-        plt.figure(figsize=(20, 8))
-        ax = sns.lineplot(x='timestamp', y='value', data=risk_data, hue='node', style='node', linewidth=2.5)
-        ax.xaxis.set_major_formatter(mdates.DateFormatter('%M:%S'))
-        ax.set_title(f'Predicted Failure Risk in {scenario_name} Scenario', fontsize=18)
-        ax.set_ylabel('Failure Risk Score (0.0 to 1.0)')
-        ax.set_xlabel('Time (Minute:Second)')
-        ax.axhline(0.7, ls='--', color='red', label='Risk Threshold (0.7)')
-        ax.legend(title='Fog Node')
-        plt.savefig(f'plot_risk_{scenario_name.lower()}.png', dpi=300, bbox_inches='tight')
-        print(f"Saved: plot_risk_{scenario_name.lower()}.png")
-        plt.close()
-
-def plot_comparison(data):
-    """
-    Creates high-level comparison plots between scenarios.
-    """
-    print("Generating comparison plots...")
-    cpu_data = data[data['metric'] == 'cpu'].copy()
-    if not cpu_data.empty:
-        plt.figure(figsize=(12, 8))
-        ax = sns.boxplot(x="scenario", y="value", hue="node", data=cpu_data, order=['Reactive', 'Proactive'])
-        ax.set_title('Comparison of Overall CPU Load Distribution', fontsize=18)
-        ax.set_xlabel('Scenario')
-        ax.set_ylabel('CPU Usage (%)')
-        ax.legend(title='Fog Node')
-        plt.savefig('plot_comparison_cpu_boxplot.png', dpi=300, bbox_inches='tight')
-        print("Saved: plot_comparison_cpu_boxplot.png")
-        plt.close()
+    plt.show()
 
 if __name__ == '__main__':
-    try:
-        # Attempt to read the results file
-        data = pd.read_csv('results.csv', parse_dates=['timestamp'])
-    except FileNotFoundError:
-        print("Error: 'results.csv' not found. Please run parser.py first.")
-    else:
-        # Set the global plot theme
-        sns.set_theme(style="darkgrid", palette="colorblind")
-        
-        # Create detailed plots for each scenario found in the data
-        for scenario in data['scenario'].unique():
-            scenario_data = data[data['scenario'] == scenario]
-            plot_single_scenario(scenario_data, scenario)
-            
-        # Create comparison plots if more than one scenario exists
-        if data['scenario'].nunique() > 1:
-            plot_comparison(data)
-
+    create_visualizations('results.csv')
